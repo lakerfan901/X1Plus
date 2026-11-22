@@ -15,7 +15,13 @@ class TailLog:
         """
         
         # Has the inode changed (i.e., the logs have rotated?)
-        if os.stat(self.filepath).st_ino != self.ino:
+        try:
+            ino = os.stat(self.filepath).st_ino
+        except FileNotFoundError:
+            # the log is in the middle of being rotated (renamed away, but
+            # not recreated yet); come back and look again in a moment
+            return None
+        if ino != self.ino:
             if self.fd:
                 self.buf += self.fd.read() + "\n"
                 self.fd.close()
@@ -43,7 +49,9 @@ class TailLog:
         """
         while True:
             line = self.readline()
-            if not line:
+            if line is None:
+                # (None means "nothing to read yet"; an empty string is just
+                # a blank line in the log, and is not a reason to nap)
                 time.sleep(self.interval)
             else:
                 yield line

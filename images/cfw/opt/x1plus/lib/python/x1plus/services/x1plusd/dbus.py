@@ -61,7 +61,8 @@ class X1PlusDBusService:
                 msg = await queue.get()
                 method = msg.header.fields[HeaderFields.member]
 
-                if msg.header.fields[HeaderFields.signature] != "s":
+                # (a call with no arguments has no signature field at all)
+                if msg.header.fields.get(HeaderFields.signature) != "s":
                     await self.router.send(
                         new_error(msg, "x1plus.x1plusd.Error.BadSignature")
                     )

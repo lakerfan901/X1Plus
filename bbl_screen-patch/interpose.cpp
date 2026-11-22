@@ -881,7 +881,7 @@ SWIZZLE(int, bbl_sal_verify_firmware_x2path, const char *s1, int a, const char *
         return 0;
     }
     int rv = next(s1, a, s2);
-    printf("bbl_sal_verify_firmware_x2path: original call returned %d\n", s1, a, s2, rv);
+    printf("bbl_sal_verify_firmware_x2path: original call returned %d\n", rv);
     return rv;
 }
 
@@ -1049,7 +1049,9 @@ SWIZZLE(void, _Z21qRegisterResourceDataiPKhS0_S0_, int version, unsigned char co
     QString qname;
     qname.resize(qFromBigEndian<qint16>(name));
     qFromBigEndian<ushort>(name + 6, qname.size(), qname.data());
-    const char *sname = qname.toLatin1().data();
+    /* keep the QByteArray alive for as long as we look at its contents */
+    QByteArray sname_ba = qname.toLatin1();
+    const char *sname = sname_ba.constData();
     
     printf("qRegisterResourceData version %d, %p %p %p (%s)\n", version, tree, name, data, sname);
 

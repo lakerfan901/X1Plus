@@ -44,11 +44,13 @@ class Rp2040ExpansionDevice(ExpansionDevice):
         if not lan9514_eth:
             return None
     
-        if lan9514_eth.product.startswith('Expansion Board X1P-002-C'):
-            revision = lan9514_eth.product.split(' ')[2]
+        # (pyusb gives None, not '', for a device with no product string)
+        product = lan9514_eth.product or ''
+        if product.startswith('Expansion Board X1P-002-C'):
+            revision = product.split(' ')[2]
             serial = lan9514_eth.serial_number
-        elif lan9514_eth.product.startswith('Expander X1P-002-C'):
-            revision = lan9514_eth.product.split(' ')[1]
+        elif product.startswith('Expander X1P-002-C'):
+            revision = product.split(' ')[1]
             serial = lan9514_eth.serial_number
         else:
             logger.warning("found a LAN9514, but it does not appear to be an X1P-002-C, so we will not even try resetting an attached RP2040")
@@ -154,13 +156,16 @@ class Rp2040ExpansionDevice(ExpansionDevice):
     READ_CACHE_INTERVAL_MS = 50
 
     def _gpio_read(self, pin):
-        now = time.time()
+        # (monotonic, so that the clock being set cannot leave us serving a
+        # stale read for however far it jumped)
+        now = time.monotonic()
         if (now - self.gpio_last_read_time) > (self.READ_CACHE_INTERVAL_MS / 1000.0):
             self.ep_out.write(b'\x05')
             buf = b""
             while len(buf) < 8:
                 buf += self.ep_in.read(0x100)
             (self.gpio_last_read_data, ) = struct.unpack("<Q", buf)
+            self.gpio_last_read_time = now
         
         return ((self.gpio_last_read_data >> pin) & 1) == 1
     

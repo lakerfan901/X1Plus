@@ -162,7 +162,7 @@ Item {
             // else, then set it back
             var old_diameter = DeviceManager.maintain.nozzleDiameter;
             DeviceManager.maintain.nozzleDiameter = "";
-            DeviceManager.maintain.nozzleDiameter = DeviceManager.maintain.nozzleDiameter;
+            DeviceManager.maintain.nozzleDiameter = old_diameter;
             
             isInstalling = false;
             didInstall = true;

@@ -37,4 +37,10 @@ class SensorsService(X1PlusDBusService):
 
         # use the "synthesize_report" mechanism in mqtt_reroute.cpp to make
         # device_gate publish both to the local mqtt broker and to the cloud
-        await self.daemon.mqtt.publish_request({ "x1plus": { "synthesize_report": { "x1plus": { "sensor": { name: data } } } } })
+        # The broker connection can be on its way down when we get here.
+        # Sensor loops (and some callers that do not hold on to the task
+        # they run us in) do not expect that to raise.
+        try:
+            await self.daemon.mqtt.publish_request({ "x1plus": { "synthesize_report": { "x1plus": { "sensor": { name: data } } } } })
+        except Exception as e:
+            logger.warning(f"could not publish sensor {name} over MQTT: {e.__class__.__name__}: {e}")

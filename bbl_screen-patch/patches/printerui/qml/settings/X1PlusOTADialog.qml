@@ -33,7 +33,7 @@ Item {
             keepDialog: true
             onClicked: {
                 var rv = X1Plus.OTA.update();
-                if (rv.status != 'failed') {
+                if (rv.status != 'failure') {
                     otaBusy = true;
                 }
             }

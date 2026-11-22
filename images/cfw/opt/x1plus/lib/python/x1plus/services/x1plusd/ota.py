@@ -168,15 +168,24 @@ class OTAService(X1PlusDBusService):
         self.base_update_downloaded = False
 
         # Now that we have the build info, do our check to see if there's an update
-        if self.build_info.get("buildTimestamp", 0) < self.last_check_response.get(
+        # (and if there isn't one any more -- say, the OTA URL changed to a
+        # channel that is not ahead of us -- stop claiming that there is)
+        self.ota_available = self.build_info.get("buildTimestamp", 0) < self.last_check_response.get(
             "buildTimestamp", 0
-        ):
-            self.ota_available = True
-            self._check_fwfiles()
+        )
+        if self.ota_available:
+            await self._check_fwfiles_in_background()
 
         # the status diagnostics will give the contents later
         logger.debug("_update_check successfully downloaded ota.json")
-    
+
+    async def _check_fwfiles_in_background(self):
+        # MD5ing a hundred megabytes or so of firmware off of the SD card
+        # takes seconds; do it on a thread so that the rest of x1plusd (DBus,
+        # MQTT, LED animations, ...) does not stall while it runs.  Only
+        # _ota_task ever gets here, so there is never more than one at once.
+        await asyncio.to_thread(self._check_fwfiles)
+
     def _check_fwfiles(self):
         if not self.last_check_response:
             return
@@ -283,7 +292,7 @@ class OTAService(X1PlusDBusService):
                 did_work = True
             
             if self.recheck_files_request or self.download_ota_request:
-                self._check_fwfiles()
+                await self._check_fwfiles_in_background()
                 self.recheck_files_request = False
                 did_work = True
             

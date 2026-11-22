@@ -53,7 +53,7 @@ class HTTPService():
                 method = pkt['params']['method']
                 params = pkt['params']['params']
             except Exception as e:
-                pkt['error'] = {'code': -32602, 'message': str(e)}
+                rv['error'] = {'code': -32602, 'message': str(e)}
                 await ws.send_json(rv)
                 return
             dmsg = new_method_call(addr, method, 's', (json.dumps(params), ))
@@ -63,7 +63,7 @@ class HTTPService():
             else:
                 rv['result'] = json.loads(reply.body[0])
         else:
-            pkt['error'] = {'code': -32601, 'message': 'method not found'}
+            rv['error'] = {'code': -32601, 'message': 'method not found'}
         await ws.send_json(rv)
 
     async def websocket_main(self, ws):
@@ -74,36 +74,46 @@ class HTTPService():
             requestq_future = None
             reportq_future = None
             
-            while True:
-                # XXX: This is sort of unpleasant and really could use to be
-                # refactored...  but it work.
+            try:
+                while True:
+                    # XXX: This is sort of unpleasant and really could use to be
+                    # refactored...  but it work.
 
-                if ws_future == None:
-                    ws_future = asyncio.ensure_future(anext(ws)) # no await!
-                if requestq_future == None:
-                    requestq_future = asyncio.ensure_future(requestq.get()) # no await!
-                if reportq_future == None:
-                    reportq_future = asyncio.ensure_future(reportq.get()) # no await!
-                
-                await asyncio.wait((ws_future, requestq_future, reportq_future, ), return_when=asyncio.FIRST_COMPLETED)
+                    if ws_future == None:
+                        ws_future = asyncio.ensure_future(anext(ws)) # no await!
+                    if requestq_future == None:
+                        requestq_future = asyncio.ensure_future(requestq.get()) # no await!
+                    if reportq_future == None:
+                        reportq_future = asyncio.ensure_future(reportq.get()) # no await!
 
-                if ws_future.done():
-                    try:
-                        msg = ws_future.result()
-                    except StopAsyncIteration:
-                        break
-                    await self.websocket_handle_msg(ws, msg)
-                    ws_future = None
+                    await asyncio.wait((ws_future, requestq_future, reportq_future, ), return_when=asyncio.FIRST_COMPLETED)
 
-                if requestq_future.done():
-                    request = requestq_future.result()
-                    await ws.send_json({'jsonrpc': '2.0', 'method': 'mqtt.notify', 'params': { 'topic': 'request', 'payload': request } })
-                    requestq_future = None
+                    if ws_future.done():
+                        try:
+                            msg = ws_future.result()
+                        except StopAsyncIteration:
+                            break
+                        await self.websocket_handle_msg(ws, msg)
+                        ws_future = None
 
-                if reportq_future.done():
-                    report = reportq_future.result()
-                    await ws.send_json({'jsonrpc': '2.0', 'method': 'mqtt.notify', 'params': { 'topic': 'report', 'payload': report } })
-                    reportq_future = None
+                    if requestq_future.done():
+                        request = requestq_future.result()
+                        await ws.send_json({'jsonrpc': '2.0', 'method': 'mqtt.notify', 'params': { 'topic': 'request', 'payload': request } })
+                        requestq_future = None
+
+                    if reportq_future.done():
+                        report = reportq_future.result()
+                        await ws.send_json({'jsonrpc': '2.0', 'method': 'mqtt.notify', 'params': { 'topic': 'report', 'payload': report } })
+                        reportq_future = None
+            finally:
+                # Whatever is still pending here is waiting on a queue that
+                # nobody will ever feed again.  If we just drop these, they
+                # get garbage collected while pending, asyncio reports "Task
+                # was destroyed but it is pending!" to the loop exception
+                # handler, and x1plusd's handler stops the whole daemon.
+                for future in (ws_future, requestq_future, reportq_future):
+                    if future is not None and not future.done():
+                        future.cancel()
     
     async def route_websocket(self, request):
         ws = web.WebSocketResponse(autoping=True, heartbeat=10)

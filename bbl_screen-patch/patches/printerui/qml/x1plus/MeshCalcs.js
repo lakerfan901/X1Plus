@@ -202,8 +202,10 @@ function bedMetrics(mesh) {
      */
     var bedxy1 = [[], [], []];
     var bedz = [[]];
-    var zmin = 0;
-    var zmax = 0;
+    /* start from the first point, not from zero: a bed that sits entirely
+     * above (or below) z=0 should not have that offset counted as deviation */
+    var zmin = Infinity;
+    var zmax = -Infinity;
     for (var y in mesh) {
         for (var x in mesh[y]) {
             bedxy1[0].push(parseFloat(y));
@@ -236,7 +238,7 @@ function bedMetrics(mesh) {
             z2max = Math.max(z2max, newz);
         }
     }
-    return { tiltX: tiltx, tiltY: tilty, nonplanarity: z2max - z2min, peakToPeak: zmax - zmin };
+    return { tiltX: tiltx, tiltY: tilty, nonplanarity: z2max - z2min, peakToPeak: bedz[0].length ? zmax - zmin : 0 };
 }
 
 function describeMetrics(metrics) {

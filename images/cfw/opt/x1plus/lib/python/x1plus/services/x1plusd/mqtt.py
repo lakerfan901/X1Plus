@@ -36,6 +36,12 @@ class MQTTClient():
             except Exception as e:
                 logger.warning(f"unparseable message on topic {message.topic}: {message.payload}")
                 continue
+            if not isinstance(payload, dict):
+                # every handler assumes a JSON object; anything else (a bare
+                # number or string from some other MQTT client) would raise
+                # in here and take the whole MQTT task down with it
+                logger.warning(f"ignoring non-object message on topic {message.topic}: {message.payload}")
+                continue
             if "/request" in message.topic.value:
                 for handler in self.request_message_handlers.copy(): # avoid problems if this gets mutated out from under us mid handler
                     await handler(payload)
@@ -83,7 +89,13 @@ class MQTTClient():
                     await client.subscribe("device/+/report")
                     self.mqttc = client
                     loop_task = asyncio.create_task(self.mqtt_message_loop())
-                    await asyncio.wait([loop_task, asyncio.ensure_future(self.reconnect_event.wait())], return_when=asyncio.FIRST_COMPLETED)
+                    reconnect_task = asyncio.ensure_future(self.reconnect_event.wait())
+                    try:
+                        await asyncio.wait([loop_task, reconnect_task], return_when=asyncio.FIRST_COMPLETED)
+                    finally:
+                        # otherwise we leave one of these behind every time
+                        # the connection drops
+                        reconnect_task.cancel()
                     loop_task.cancel()
                     try:
                         await loop_task
