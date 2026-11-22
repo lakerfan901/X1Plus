@@ -11,6 +11,7 @@ import logging
 import os
 import sys
 import ssl
+import subprocess
 import tempfile
 
 from aiortsp.rtsp.reader import RTSPReader
@@ -91,7 +92,13 @@ class AioRtspReceiver:
             raise RuntimeError("receive_h264 returned no data (stream closed before a full frame was received)")
         with tempfile.NamedTemporaryFile() as h264file, tempfile.NamedTemporaryFile() as jpegfile:
             h264file.write(h264)
-            os.system(f"/opt/x1plus/bin/h264tojpeg {h264file.name} {jpegfile.name}")
+            # make sure that none of the frame is still sitting in Python's
+            # write buffer when the converter goes to read the file
+            h264file.flush()
+            # decoding and re-encoding a frame takes a while on this CPU;
+            # run it off of the event loop so that the caller's daemon keeps
+            # servicing everything else in the mean time
+            await asyncio.to_thread(subprocess.run, ["/opt/x1plus/bin/h264tojpeg", h264file.name, jpegfile.name])
             jpeg = jpegfile.read()
         return jpeg
 

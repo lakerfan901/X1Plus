@@ -12,7 +12,7 @@ def get_settings(force = False):
         _settings = call(SETTINGS_DBUS_ADDRESS, 'GetSettings')
     return _settings
 
-def get():
+def get(*args):
     return get_settings().get(*args)
 
 def put_multiple(keys):

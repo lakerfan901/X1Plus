@@ -128,6 +128,7 @@ class GpioManager:
         self.gpio_poll_state = {}
         self.polling_gpios = set()
         self.poll_task = None
+        self.poll_failing = set() # GPIOs whose last poll raised, so we log it once
         self.action_task = None
         self.event_handlers = []
         
@@ -158,13 +159,25 @@ class GpioManager:
 
     async def _poll(self):
         while True:
-            for gpio in self.polling_gpios:
-                oldstate = self.gpio_poll_state[gpio]
-                newstate = gpio.read()
-                if newstate != oldstate:
-                    if gpio.on_change:
-                        gpio.on_change(newstate, oldstate)
-                    self.gpio_poll_state[gpio] = newstate
+            for gpio in list(self.polling_gpios):
+                # One failed read (or one callback that raises) must not end
+                # this task: nothing would restart it, since poll_task would
+                # still be set, and every button would be dead until
+                # x1plusd restarted.
+                try:
+                    oldstate = self.gpio_poll_state[gpio]
+                    newstate = gpio.read()
+                    if newstate != oldstate:
+                        # (record the new state first, so that a callback
+                        # that raises is not called again on every tick)
+                        self.gpio_poll_state[gpio] = newstate
+                        if gpio.on_change:
+                            gpio.on_change(newstate, oldstate)
+                    self.poll_failing.discard(gpio)
+                except Exception as e:
+                    if gpio not in self.poll_failing:
+                        self.poll_failing.add(gpio)
+                        logger.error(f"error polling gpio {gpio}: {e.__class__.__name__}: {e}")
             await asyncio.sleep(self.POLLING_INTERVAL_MS / 1000) # we may get cancelled here, that is fine
     
     def _update_poll_task(self):
@@ -213,6 +226,7 @@ class GpioManager:
         self.gpios.remove(gpio) # asserts if not registered
         if gpio in self.gpio_poll_state:
             del self.gpio_poll_state[gpio]
+        self.poll_failing.discard(gpio)
         self._update_poll_task()
     
     def on_event(self, match, callback):

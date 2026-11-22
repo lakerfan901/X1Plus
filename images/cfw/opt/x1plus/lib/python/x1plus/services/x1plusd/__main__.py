@@ -1,5 +1,6 @@
 import asyncio
 import logging, logging.handlers
+import sys
 import setproctitle
 
 from . import X1PlusDaemon, logger
@@ -61,5 +62,15 @@ try:
     loop.run_forever()
 finally:
     logger.error("x1plusd event loop has terminated!")
-    loop.run_until_complete(loop.shutdown_asyncgens())
-    loop.close()
+    try:
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()
+    finally:
+        # x1plus.dds (pulled in by modules like camera_watchdog) parks a
+        # non-daemon thread that keeps the interpreter alive until it is
+        # told to shut down.  If we do not release it, we never actually
+        # exit: the process lingers with a dead event loop, and
+        # service_check never notices that it needs to restart us.
+        dds = sys.modules.get("x1plus.dds")
+        if dds:
+            dds.shutdown()

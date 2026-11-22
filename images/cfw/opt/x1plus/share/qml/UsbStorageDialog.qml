@@ -65,7 +65,9 @@ Item {
             keepDialog: true
             onClicked: {
                 var data = X1PlusNative.readFile(currentPath + "/" + selectedEntry.name);
-                if (data.length === 0) {
+                // readFile hands back an ArrayBuffer, which has a byteLength
+                // (and no length); an empty one means the read failed
+                if (data.byteLength === 0) {
                     copyStatus = qsTr("Copy failed");
                 } else {
                     X1PlusNative.saveFile("/sdcard/" + selectedEntry.name, data);

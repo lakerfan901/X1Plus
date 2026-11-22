@@ -30,6 +30,18 @@ EXPANSION_PATH = "/x1plus/expansion"
 
 USB_POLL_INTERVAL = 2
 
+# Free space on a drive changes on every poll for as long as something is
+# writing to it (which, with sd_offload, is the whole of every print).  Tell
+# the rest of the system about that only this often, in seconds; anything
+# structural (a drive or device coming or going) is still reported at once.
+USB_USAGE_REPORT_INTERVAL = 30
+
+def _usb_without_usage(usb):
+    return {
+        "mounts": [{k: v for k, v in mount.items() if not k.startswith("disk_")} for mount in usb["mounts"]],
+        "devices": usb["devices"],
+    }
+
 # Get a raw mapping of all USB mounts.  Caller is responsible for demapping
 # to marketing names.
 def _get_usb_mounts():
@@ -134,6 +146,8 @@ class ExpansionManager(X1PlusDBusService):
     async def task(self):
         self._update_drivers()
         self._usb = {"mounts": [], "devices": {}}
+        self._usb_reported = self._usb
+        self._usb_reported_at = time.monotonic()
         asyncio.create_task(self._poll_usb())
         await super().task()
 
@@ -197,10 +211,19 @@ class ExpansionManager(X1PlusDBusService):
             # sort drives so Port A comes before Port B
             mounts.sort(key=lambda d: (d.get('usb_port') or d['mount_point']).upper())
             usb = { "mounts": mounts, "devices": devices }
-            if usb != self._usb:
-                self._usb = usb
-                logger.info(f"USB status changed: {usb}")
-                await self.emit_signal("UsbChanged", usb)
+            # GetUsb always gets the latest numbers...
+            self._usb = usb
+            # ... but only log, and wake up everyone listening on DBus, when
+            # there is something worth saying.
+            if usb != self._usb_reported:
+                now = time.monotonic()
+                changed = _usb_without_usage(usb) != _usb_without_usage(self._usb_reported)
+                if changed:
+                    logger.info(f"USB status changed: {usb}")
+                if changed or (now - self._usb_reported_at) >= USB_USAGE_REPORT_INTERVAL:
+                    self._usb_reported = usb
+                    self._usb_reported_at = now
+                    await self.emit_signal("UsbChanged", usb)
             
             await asyncio.sleep(USB_POLL_INTERVAL)
 

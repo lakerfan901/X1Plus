@@ -36,6 +36,10 @@ class Button:
         self.pressed = time.time()
 
     def release(self):
+        if self.pressed is None:
+            # the button was already held down when we started (or we
+            # missed the press); we cannot time it, so ignore the release
+            return
         elapsed_time = time.time() - self.pressed
         press_type = "shortPress" if elapsed_time < LONG_PRESS_THRESHOLD else "longPress"
         send_dds(self.name, press_type)

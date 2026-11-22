@@ -24,6 +24,10 @@ x1p_get_setting() {
             return 0
         elif [ "${SETTING_VALUE}" == "false" ]; then
             return 1
+        elif [ -z "${SETTING_VALUE}" ]; then
+            # jq printed nothing: the settings file is empty or unparseable.
+            # That is not a "yes" to whatever was being asked about.
+            return 1
         else
             # Currently unused, BUT if you request something that's not a boolean, just pass it through and exit 0
             echo "${SETTING_VALUE}"

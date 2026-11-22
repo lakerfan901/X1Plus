@@ -132,7 +132,11 @@ class SettingsService(X1PlusDBusService):
                 if k not in self.settings or self.settings[k] != v:
                     self.settings[k] = v
                     settings_updated[k] = v
-        self._save()
+
+        # Don't rewrite (and fsync) the file on the SD card when a client
+        # stores values that we already have.
+        if len(settings_updated) > 0:
+            self._save()
 
         # Inform everybody locally inside x1plusd who might want to know
         # that a setting has changed.

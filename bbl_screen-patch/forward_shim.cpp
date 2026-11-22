@@ -336,7 +336,7 @@ extern "C" int handle_print_dds_message_override(CGparser *_this, json &j, int p
                 { "sequence_id", j["sequence_id"] },
             };
             
-            if (!mc_spoke_new_protocol) {
+            if (!mc_speaks_new_protocol) {
                 rv["reason"] = "mc_not_new_enough";
                 rv["result"] = "fail";
                 goto publish_result;
@@ -1368,8 +1368,9 @@ static void did_read_n(void *buf, size_t rv) {
  * like around print starting?  but apparently it's not just us, but forward
  * also does.  hope the MC retransmits I suppose */
 SWIZZLE(ssize_t, read, int fd, void *buf, size_t count)
-    int rv = next(fd, buf, count);
-    if (fd == ttyS1_fd) {
+    ssize_t rv = next(fd, buf, count);
+    /* a failed read returns -1, which did_read_n would take as a length */
+    if (fd == ttyS1_fd && rv > 0) {
         did_read_n(buf, rv);
     }
     return rv;
@@ -1378,7 +1379,9 @@ SWIZZLE(ssize_t, read, int fd, void *buf, size_t count)
 SWIZZLE(ssize_t, write, int fd, const void *buf, size_t count)
     if (fd == ttyS1_fd) {
         _publish_dbus_signal("SerialPortWrite", (const char *) buf, count);
-        dbus_connection_flush(_dbus_connection);
+        /* still NULL if we could not reach the bus */
+        if (_dbus_connection)
+            dbus_connection_flush(_dbus_connection);
     }
     return next(fd, buf, count);
 }

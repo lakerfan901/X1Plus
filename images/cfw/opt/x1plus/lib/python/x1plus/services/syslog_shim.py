@@ -119,7 +119,9 @@ syslog_data = [
     ),
     # bed strain sensitivity
     RegexParser(
-        r".*strain\s*(\d)*\s*sensitivity\s*=\s*(-?\d+\.?\d*),p=(-?\d+\.\d*),Vs=(-?\d+\.\d*)",
+        # (the strain gauge number is deliberately not a capture group: the
+        # lambda below numbers its groups from the sensitivity onwards)
+        r".*strain\s*\d*\s*sensitivity\s*=\s*(-?\d+\.?\d*),p=(-?\d+\.\d*),Vs=(-?\d+\.\d*)",
         lambda match: {
             "command": "bed_strain",
             "param": {

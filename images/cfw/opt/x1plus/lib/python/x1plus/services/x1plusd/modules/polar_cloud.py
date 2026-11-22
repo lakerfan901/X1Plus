@@ -17,6 +17,7 @@ import socketio
 import ssl
 import subprocess
 import time
+import urllib.parse
 from enum import Enum, auto
 from jeepney import DBusAddress, new_method_call, MessageType
 from Crypto.PublicKey import RSA
@@ -197,11 +198,16 @@ class PolarPrintService(X1PlusDBusService):
         
         # Create the socket.io client, but don't connect yet: the
         # watchdog_task will do that work for us.
+        # engineio logs the full body of every packet at INFO, which would
+        # put the Polar PIN and the RSA private key (and every status tick)
+        # into syslog; only let its warnings through.
+        engineio_logger = logging.getLogger(__name__ + ".engineio")
+        engineio_logger.setLevel(logging.WARNING)
         self.socket = socketio.AsyncClient(
             reconnection=False, # we don't want Socket.io to reconnect for us, since we need to know if something has gone wrong and we need to do the 'welcome' dance again
             http_session=http_session,
             logger=logger,
-            engineio_logger=logger,
+            engineio_logger=engineio_logger,
         )
  
         self.socket.on("connect", self._on_connect)
@@ -394,7 +400,7 @@ class PolarPrintService(X1PlusDBusService):
 
             if self.creds.polar_sn:
                 logger.warning(f"for some reason, we have a serial number, but no key; creating a new key, and wiping the serial number")
-                await creds.wipe()
+                await self.creds.wipe()
             await self.socket.emit("makeKeyPair", {"type": "RSA", "bits": 2048})
             
             return
@@ -442,7 +448,7 @@ class PolarPrintService(X1PlusDBusService):
             if response["message"] == "Printer has been deleted":
                 logger.error(f"_on_hello_response failure: {response['message']}")
                 self.last_connection_error = "PRINTER_REMOVED"
-                self._maybe_publish_status_object()
+                await self._maybe_publish_status_object()
                 await self.creds.wipe()
                 await self._force_reconnect()
             else:
@@ -471,7 +477,7 @@ class PolarPrintService(X1PlusDBusService):
             error_msg = response.get('message', 'Key pair request failed')
             logger.error(f"_on_keypair_response failure: {error_msg}")
             self.last_connection_error = f"KEYPAIR_ERROR.{error_msg}"
-            self._maybe_publish_status_object()
+            await self._maybe_publish_status_object()
             return
         
         self.creds.public_key = response['public']
@@ -499,16 +505,17 @@ class PolarPrintService(X1PlusDBusService):
             # "MFG_MISSING": This should be impossible.
             # "EMAIL_PIN_ERROR": Send it to the interface.
             # "FORBIDDEN": There's an issue with the MAC address.
-            if response["reason"].lower() == "forbidden":
+            reason = str(error_msg).lower()
+            if reason == "forbidden":
                 # TODO: Must communicate with screen to debug this!
                 logger.error(
                     f"Forbidden. Duplicate MAC problem!\nTerminating MAC: "
                     f"{self.mac}\n\n"
                 )
 
-            if response["reason"].lower() == "email_pin_error":
+            if reason == "email_pin_error":
                 self.creds.pin = None
-                self.force_reconnect = True # kill the watchdog thread right away
+                self.reconnect_now = True # kill the watchdog thread right away
             
             await self.socket.disconnect()
             self._update_state(_ConnectState.DISCONNECTED)
@@ -941,7 +948,11 @@ class PolarPrintService(X1PlusDBusService):
         path = "/tmp/x1plus" if is_emulating() else "/sdcard"
 
         # Get file name from jobName or job_name
+        # (it comes from the cloud, so keep only the last path component:
+        # otherwise a "/" in the name fails the download, and "../" or a
+        # leading "/" would write outside of the SD card)
         self.file_name = data.get("jobName") or data.get("job_name", "print")
+        self.file_name = os.path.basename(str(self.file_name).replace("\\", "/")) or "print"
 
         # Determine the file URL - prefer 3mf, fall back to gcode
         gcode_url = data.get("gcodeFile") or data.get("gcode_file")
@@ -959,7 +970,9 @@ class PolarPrintService(X1PlusDBusService):
             return
 
         # Determine printer action based on file extension
-        extension = os.path.splitext(file_url)[1].lower()
+        # (from the path only, so that a query string on the URL does not
+        # end up being treated as part of the extension)
+        extension = os.path.splitext(urllib.parse.urlparse(file_url).path)[1].lower()
         if extension == ".3mf":
             printer_action = "3mf_file"
         else:
@@ -971,7 +984,15 @@ class PolarPrintService(X1PlusDBusService):
 
         logger.info(f"Polar print file: {file_url}, extension: {extension}, action: {printer_action}, filename: {self.file_name}")
 
-        await self._download_file(path, self.file_name, file_url)
+        try:
+            await self._download_file(path, self.file_name, file_url)
+        except Exception as e:
+            # Nothing above us catches this: left alone, it would escape the
+            # socket.io handler task and take all of x1plusd down with it,
+            # and Polar would never hear that the job did not start.
+            logger.error(f"Polar _on_print: download of {self.file_name} failed: {e.__class__.__name__}: {e}")
+            await self._job("canceled")
+            return
         location = os.path.join(path, self.file_name)
         self.start_time = datetime.datetime.now()
 
